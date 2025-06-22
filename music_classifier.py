@@ -1,4 +1,4 @@
-# 감성 음악 분류기 - Spotify API 연동 개선 포함
+# 감성 음악 분류기 - Spotify 검색 향상 + 고급 분류 알고리즘 통합 버전
 
 import streamlit as st
 import pandas as pd
@@ -6,6 +6,7 @@ import os
 import random
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+import re
 
 # -------------------- Spotify API 인증 -------------------- #
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
@@ -19,104 +20,80 @@ else:
     sp = None
 
 # -------------------- Spotify에서 트랙 정보 가져오기 -------------------- #
-def get_track_info_from_spotify(title, artist):
+def clean_text(text):
+    return re.sub(r"[\(\)\[\]\-–_:]|feat\..*|remaster.*", "", text.lower()).strip()
+
+def get_best_matching_track(title, artist):
     if not sp:
-        return None, None
+        return None, None, None
 
-    # 보다 유연한 검색 쿼리
     query = f"{title} {artist}"
-    results = sp.search(q=query, type="track", limit=1)
+    results = sp.search(q=query, type="track", limit=5)
 
-    if not results["tracks"]["items"]:
-        # fallback: 제목만 검색
-        results = sp.search(q=title, type="track", limit=1)
+    if not results['tracks']['items']:
+        results = sp.search(q=title, type="track", limit=5)
 
-    if results["tracks"]["items"]:
-        track = results["tracks"]["items"][0]
-        track_id = track["id"]
+    best_score = -1
+    best_track = None
+    title_clean = clean_text(title)
+    artist_clean = clean_text(artist)
+
+    for item in results['tracks']['items']:
+        track_name = clean_text(item['name'])
+        artist_name = clean_text(item['artists'][0]['name'])
+
+        score = 0
+        if title_clean in track_name:
+            score += 1
+        if artist_clean in artist_name:
+            score += 1
+        if score > best_score:
+            best_score = score
+            best_track = item
+
+    if best_track:
+        track_id = best_track['id']
         features = sp.audio_features([track_id])[0]
-        bpm = features["tempo"]
-        duration = features["duration_ms"] // 1000
-        return bpm, duration
+        return features, best_track['name'], best_track['artists'][0]['name']
 
-    return None, None
+    return None, None, None
 
-# -------------------- 향상된 분류 알고리즘 -------------------- #
-def classify_song(title, artist, bpm=None, duration=None):
-    title_lower = title.lower()
-    artist_lower = artist.lower()
+# -------------------- 고급 분류 알고리즘 -------------------- #
+def classify_by_features(features):
+    energy = features['energy']
+    valence = features['valence']
+    acousticness = features['acousticness']
+    tempo = features['tempo']
+    duration = features['duration_ms'] // 1000
 
-    easy_artists = ["norah jones", "sade", "air", "lauv", "lisa ono", "jack johnson"]
-    hard_artists = ["korn", "noisia", "metallica", "slipknot", "rage against the machine"]
-
-    easy_keywords = ["love", "silence", "rain", "dream", "breathe", "acoustic", "smooth", "soft", "light"]
-    hard_keywords = ["rage", "control", "dark", "blood", "scream", "burn", "power", "storm"]
-
-    easy_detail_phrases = [
-        "템포가 느리거나 일정하고, 반복되는 리듬이 안정감을 줘요.",
-        "감정 표현이 절제되어 있고, 듣는 이를 조용히 감싸요.",
-        "복잡하지 않은 구성 덕분에 흐름을 따라가기 쉬워요.",
-        "백그라운드로 흘려듣기 좋아요, 집중 없이도 편안함을 느낄 수 있거든요."
-    ]
-
-    hard_detail_phrases = [
-        "고조되는 전개와 갑작스러운 전환이 긴장을 유도해요.",
-        "사운드가 풍부하고, 다층적인 구조로 깊은 몰입을 요구해요.",
-        "감정을 강하게 분출하며 듣는 사람의 에너지를 자극해요.",
-        "복잡하고 예측 불가능한 흐름이라 쉽게 듣기는 어렵지만 그만큼 강렬해요."
-    ]
-
-    bpm_phrases = []
-    if bpm:
-        if bpm < 90:
-            bpm_phrases.append("템포가 매우 느려서 마음이 차분해져요.")
-        elif bpm < 110:
-            bpm_phrases.append("편안한 리듬감으로 흐르듯이 이어져요.")
-        elif bpm > 140:
-            bpm_phrases.append("빠른 템포가 곡의 에너지를 극대화시켜요.")
-
-    if duration:
-        if duration < 150:
-            bpm_phrases.append("짧은 곡 길이로 강렬하게 휘몰아치는 느낌이에요.")
-        elif duration > 300:
-            bpm_phrases.append("긴 러닝타임 덕분에 서서히 몰입하게 돼요.")
-
-    score = 0
     reasons = []
 
-    if any(a in artist_lower for a in easy_artists):
-        score -= 2
-        reasons.append(random.choice(easy_detail_phrases))
-    if any(a in artist_lower for a in hard_artists):
-        score += 2
-        reasons.append(random.choice(hard_detail_phrases))
+    # 템포 기반
+    if tempo < 90:
+        reasons.append("템포가 매우 느려서 마음이 차분해져요.")
+    elif tempo < 110:
+        reasons.append("편안한 리듬감으로 흐르듯이 이어져요.")
+    elif tempo > 140:
+        reasons.append("빠른 템포가 곡의 에너지를 극대화시켜요.")
 
-    if any(k in title_lower for k in easy_keywords):
-        score -= 1
-        reasons.append(random.choice(easy_detail_phrases))
-    if any(k in title_lower for k in hard_keywords):
-        score += 1
-        reasons.append(random.choice(hard_detail_phrases))
+    # 길이 기반
+    if duration < 150:
+        reasons.append("짧은 곡 길이로 강렬하게 휘몰아치는 느낌이에요.")
+    elif duration > 300:
+        reasons.append("긴 러닝타임 덕분에 서서히 몰입하게 돼요.")
 
-    reasons.extend(bpm_phrases)
-
-    if bpm is None or duration is None:
-        category = "🤔 판단 보류"
-        reason = "Spotify에서 곡 정보를 찾을 수 없어 정확한 분류가 어려워요."
-        return category, reason
-
-    if score >= 2:
-        category = "🔊 하드 리스닝 (Hard Listening)"
-    elif score <= -1:
+    # 분위기 기반
+    if valence < 0.3 and acousticness > 0.6:
         category = "🌿 이지 리스닝 (Easy Listening)"
+        reasons.append("감정 표현이 절제되어 있고, 사운드가 부드러워요.")
+    elif energy > 0.7 and tempo > 130:
+        category = "🔊 하드 리스닝 (Hard Listening)"
+        reasons.append("에너지가 높고 전개가 강렬해서 집중하게 만들어요.")
     else:
         category = "🤔 판단 보류"
+        reasons.append("특징이 섞여 있어 명확히 분류하기 어려운 곡이에요.")
 
-    if reasons:
-        reason = "\n- " + "\n- ".join(reasons)
-    else:
-        reason = "정보가 부족해 추가 확인이 필요해요."
-
+    reason = "\n- " + "\n- ".join(reasons)
     return category, reason
 
 # -------------------- 분류 기록 저장 -------------------- #
@@ -142,18 +119,22 @@ def save_history(title, artist, category, reason):
 # -------------------- Streamlit UI -------------------- #
 st.set_page_config(page_title="감성 음악 분류기", layout="centered")
 st.title("🎵 감성 음악 분류기")
-st.write("곡 제목과 아티스트명을 입력하면, 이지 리스닝 / 하드 리스닝으로 분류하고 Spotify에서 곡 정보를 자동으로 가져와요.")
+st.write("곡 제목과 아티스트명을 입력하면 Spotify에서 곡 정보를 검색하여 자동 분류해드려요.")
 
 title = st.text_input("곡 제목", "")
 artist = st.text_input("아티스트명", "")
 
 if st.button("Spotify에서 자동 분석하기"):
     if title.strip() and artist.strip():
-        bpm, duration = get_track_info_from_spotify(title, artist)
-        category, reason = classify_song(title, artist, bpm, duration)
-        st.subheader(f"결과: {category}")
-        st.write(f"📝 상세한 해설:\n{reason}")
-        save_history(title, artist, category, reason)
+        features, matched_title, matched_artist = get_best_matching_track(title, artist)
+        if features:
+            category, reason = classify_by_features(features)
+            st.subheader(f"결과: {category}")
+            st.write(f"🔎 매칭된 트랙: {matched_title} - {matched_artist}")
+            st.write(f"📝 상세한 해설:\n{reason}")
+            save_history(matched_title, matched_artist, category, reason)
+        else:
+            st.error("Spotify에서 곡 정보를 찾을 수 없습니다. 제목이나 아티스트를 다시 확인해보세요.")
     else:
         st.warning("곡 제목과 아티스트명을 모두 입력해 주세요.")
 
