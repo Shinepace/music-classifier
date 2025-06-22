@@ -4,8 +4,8 @@ import streamlit as st
 import pandas as pd
 import os
 import random
-import spotify
-from spotify.oauth2 import SpotifyClientCredentials
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 import re
 
 # -------------------- Spotify API 인증 -------------------- #
@@ -14,7 +14,7 @@ SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
 if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
     auth_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
-    sp = spotify.Spotify(auth_manager=auth_manager)
+    sp = spotipy.Spotify(auth_manager=auth_manager)
 else:
     st.error("Spotify API 인증 정보가 없습니다. SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET 환경변수를 설정해주세요.")
     sp = None
