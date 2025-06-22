@@ -1,4 +1,4 @@
-# 감성 음악 분류기 - Spotify API 연동 포함
+# 감성 음악 분류기 - Spotify API 연동 개선 포함
 
 import streamlit as st
 import pandas as pd
@@ -22,9 +22,15 @@ else:
 def get_track_info_from_spotify(title, artist):
     if not sp:
         return None, None
-    
-    query = f"track:{title} artist:{artist}"
+
+    # 보다 유연한 검색 쿼리
+    query = f"{title} {artist}"
     results = sp.search(q=query, type="track", limit=1)
+
+    if not results["tracks"]["items"]:
+        # fallback: 제목만 검색
+        results = sp.search(q=title, type="track", limit=1)
+
     if results["tracks"]["items"]:
         track = results["tracks"]["items"][0]
         track_id = track["id"]
@@ -32,6 +38,7 @@ def get_track_info_from_spotify(title, artist):
         bpm = features["tempo"]
         duration = features["duration_ms"] // 1000
         return bpm, duration
+
     return None, None
 
 # -------------------- 향상된 분류 알고리즘 -------------------- #
@@ -93,6 +100,11 @@ def classify_song(title, artist, bpm=None, duration=None):
 
     reasons.extend(bpm_phrases)
 
+    if bpm is None or duration is None:
+        category = "🤔 판단 보류"
+        reason = "Spotify에서 곡 정보를 찾을 수 없어 정확한 분류가 어려워요."
+        return category, reason
+
     if score >= 2:
         category = "🔊 하드 리스닝 (Hard Listening)"
     elif score <= -1:
@@ -138,13 +150,10 @@ artist = st.text_input("아티스트명", "")
 if st.button("Spotify에서 자동 분석하기"):
     if title.strip() and artist.strip():
         bpm, duration = get_track_info_from_spotify(title, artist)
-        if bpm and duration:
-            category, reason = classify_song(title, artist, bpm, duration)
-            st.subheader(f"결과: {category}")
-            st.write(f"📝 상세한 해설:\n{reason}")
-            save_history(title, artist, category, reason)
-        else:
-            st.error("Spotify에서 곡 정보를 찾을 수 없습니다.")
+        category, reason = classify_song(title, artist, bpm, duration)
+        st.subheader(f"결과: {category}")
+        st.write(f"📝 상세한 해설:\n{reason}")
+        save_history(title, artist, category, reason)
     else:
         st.warning("곡 제목과 아티스트명을 모두 입력해 주세요.")
 
